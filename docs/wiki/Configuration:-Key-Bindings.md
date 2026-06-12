@@ -349,6 +349,16 @@ binds {
 }
 ```
 
+#### `toggle-floating-windows`
+
+Hide or show all floating windows.
+
+```kdl
+binds {
+    Mod+F { toggle-floating-windows; }
+}
+```
+
 #### `screenshot`, `screenshot-screen`, `screenshot-window`
 
 Actions for taking screenshots.

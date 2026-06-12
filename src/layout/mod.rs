@@ -393,6 +393,7 @@ pub struct Options {
     pub gestures: niri_config::Gestures,
     pub overview: niri_config::Overview,
     pub blur: niri_config::Blur,
+    pub floating_windows_hidden: bool,
     // Debug flags.
     pub disable_resize_throttling: bool,
     pub disable_transactions: bool,
@@ -654,6 +655,7 @@ impl Options {
             gestures: config.gestures,
             overview: config.overview,
             blur: config.blur,
+            floating_windows_hidden: false,
             disable_resize_throttling: config.debug.disable_resize_throttling,
             disable_transactions: config.debug.disable_transactions,
             deactivate_unfocused_windows: config.debug.deactivate_unfocused_windows,
@@ -2986,6 +2988,11 @@ impl<W: LayoutElement> Layout<W> {
         self.options = options;
     }
 
+    pub fn set_floating_windows_hidden(&mut self, hidden: bool) {
+        let mut options = (*self.options).clone();
+        options.floating_windows_hidden = hidden;
+        self.update_options(options);
+    }
     pub fn toggle_width(&mut self, forwards: bool) {
         let Some(workspace) = self.active_workspace_mut() else {
             return;

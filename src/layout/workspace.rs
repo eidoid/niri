@@ -377,11 +377,11 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn update_render_elements(&mut self, is_active: bool) {
         self.scrolling
-            .update_render_elements(is_active && !self.floating_is_active.get());
+            .update_render_elements(is_active && !self.floating_is_active());
 
         let view_rect = Rectangle::from_size(self.view_size);
         self.floating
-            .update_render_elements(is_active && self.floating_is_active.get(), view_rect);
+            .update_render_elements(is_active && self.floating_is_active(), view_rect);
 
         self.shadow.update_render_elements(
             self.view_size,
@@ -469,7 +469,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn active_window(&self) -> Option<&W> {
-        if self.floating_is_active.get() {
+        if self.floating_is_active() {
             self.floating.active_window()
         } else {
             self.scrolling.active_window()
@@ -477,7 +477,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn active_window_mut(&mut self) -> Option<&mut W> {
-        if self.floating_is_active.get() {
+        if self.floating_is_active() {
             self.floating.active_window_mut()
         } else {
             self.scrolling.active_window_mut()
@@ -1610,7 +1610,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Logical>> {
-        if self.floating_is_active.get() {
+        if self.floating_is_active() {
             self.floating.active_window_visual_rectangle()
         } else {
             self.scrolling.active_window_visual_rectangle()
@@ -1680,6 +1680,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn is_floating_visible(&self) -> bool {
+        if self.options.floating_windows_hidden {
+            return false;
+        }
+
         // If the focus is on a fullscreen scrolling window, hide the floating windows.
         matches!(
             self.floating_is_active,
@@ -1959,7 +1963,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn floating_is_active(&self) -> bool {
-        self.floating_is_active.get()
+        self.floating_is_active.get() && !self.options.floating_windows_hidden
     }
 
     pub fn floating_logical_to_size_frac(

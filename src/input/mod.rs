@@ -2193,6 +2193,21 @@ impl State {
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
+            Action::ToggleFloatingWindows => {
+                let hidden = !self.niri.floating_windows_hidden;
+                self.niri.floating_windows_hidden = hidden;
+                self.niri.layout.set_floating_windows_hidden(hidden);
+                if hidden {
+                    self.niri.layout.focus_tiling();
+                } else {
+                    self.niri.layout.focus_floating();
+                }
+                self.update_keyboard_focus();
+                self.update_pointer_contents();
+                // FIXME: granular
+                self.niri.queue_redraw_all();
+                info!(hidden, "toggled floating window visibility");
+            }
             Action::MoveFloatingWindowById { id, x, y } => {
                 let window = if let Some(id) = id {
                     let window = self.niri.layout.windows().find(|(_, m)| m.id().get() == id);

@@ -222,6 +222,9 @@ pub struct Niri {
     /// Whether the at-startup=true window rules are active.
     pub is_at_startup: bool,
 
+    /// Whether floating windows are currently hidden.
+    pub floating_windows_hidden: bool,
+
     /// Clock for driving animations.
     pub clock: Clock,
 
@@ -1456,6 +1459,9 @@ impl State {
         }
 
         self.niri.layout.update_config(&config);
+        self.niri
+            .layout
+            .set_floating_windows_hidden(self.niri.floating_windows_hidden);
         for mapped in self.niri.mapped_layer_surfaces.values_mut() {
             mapped.update_config(&config);
         }
@@ -2507,6 +2513,7 @@ impl Niri {
             is_session_instance,
             start_time: Instant::now(),
             is_at_startup: true,
+            floating_windows_hidden: false,
             clock: animation_clock,
 
             layout,
