@@ -346,6 +346,7 @@ pub enum Action {
     FocusFloating,
     FocusTiling,
     SwitchFocusBetweenFloatingAndTiling,
+    ToggleFloatingWindows,
     #[knuffel(skip)]
     MoveFloatingWindowById {
         id: Option<u64>,
@@ -355,6 +356,9 @@ pub enum Action {
     ToggleWindowRuleOpacity,
     #[knuffel(skip)]
     ToggleWindowRuleOpacityById(u64),
+    ToggleWindowRuleInputPassthrough,
+    #[knuffel(skip)]
+    ToggleWindowRuleInputPassthroughById(u64),
     SetDynamicCastWindow,
     #[knuffel(skip)]
     SetDynamicCastWindowById(u64),
@@ -681,12 +685,19 @@ impl From<niri_ipc::Action> for Action {
             niri_ipc::Action::SwitchFocusBetweenFloatingAndTiling {} => {
                 Self::SwitchFocusBetweenFloatingAndTiling
             }
+            niri_ipc::Action::ToggleFloatingWindows {} => Self::ToggleFloatingWindows,
             niri_ipc::Action::MoveFloatingWindow { id, x, y } => {
                 Self::MoveFloatingWindowById { id, x, y }
             }
             niri_ipc::Action::ToggleWindowRuleOpacity { id: None } => Self::ToggleWindowRuleOpacity,
             niri_ipc::Action::ToggleWindowRuleOpacity { id: Some(id) } => {
                 Self::ToggleWindowRuleOpacityById(id)
+            }
+            niri_ipc::Action::ToggleWindowRuleInputPassthrough { id: None } => {
+                Self::ToggleWindowRuleInputPassthrough
+            }
+            niri_ipc::Action::ToggleWindowRuleInputPassthrough { id: Some(id) } => {
+                Self::ToggleWindowRuleInputPassthroughById(id)
             }
             niri_ipc::Action::SetDynamicCastWindow { id: None } => Self::SetDynamicCastWindow,
             niri_ipc::Action::SetDynamicCastWindow { id: Some(id) } => {

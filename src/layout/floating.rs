@@ -13,7 +13,7 @@ use super::scrolling::ColumnWidth;
 use super::tile::{Tile, TileRenderElement, TileRenderSnapshot};
 use super::workspace::{InteractiveResize, ResolvedSize};
 use super::{
-    ConfigureIntent, InteractiveResizeData, LayoutElement, Options, RemovedTile, SizeFrac,
+    ConfigureIntent, HitType, InteractiveResizeData, LayoutElement, Options, RemovedTile, SizeFrac,
 };
 use crate::animation::{Animation, Clock};
 use crate::niri_render_elements;
@@ -1086,6 +1086,17 @@ impl<W: LayoutElement> FloatingSpace<W> {
         }
     }
 
+    pub fn input_passthrough_window_under(&self, pos: Point<f64, Logical>) -> Option<&W> {
+        self.tiles_with_render_positions()
+            .find_map(|(tile, tile_pos)| {
+                if !tile.window().is_input_passthrough() {
+                    return None;
+                }
+
+                HitType::hit_tile(tile, tile_pos, pos).map(|_| tile.window())
+            })
+    }
+
     pub fn interactive_resize_begin(&mut self, window: W::Id, edges: ResizeEdge) -> bool {
         if self.interactive_resize.is_some() {
             return false;
@@ -1162,7 +1173,12 @@ impl<W: LayoutElement> FloatingSpace<W> {
         self.interactive_resize = None;
     }
 
-    pub fn refresh(&mut self, is_active: bool, is_focused: bool) {
+    pub fn refresh(
+        &mut self,
+        is_active: bool,
+        is_focused: bool,
+        hidden_input_passthrough_window: Option<&W::Id>,
+    ) {
         let active = self.active_window_id.clone();
         for tile in &mut self.tiles {
             let win = tile.window_mut();
@@ -1203,6 +1219,10 @@ impl<W: LayoutElement> FloatingSpace<W> {
             }
 
             win.refresh();
+
+            let hidden =
+                hidden_input_passthrough_window == Some(win.id()) && win.is_input_passthrough();
+            tile.set_input_passthrough_hidden(hidden);
         }
     }
 

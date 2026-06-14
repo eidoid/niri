@@ -1584,6 +1584,21 @@ impl<W: LayoutElement> Monitor<W> {
         ws.resize_edges_under(pos_within_output - geo.loc)
     }
 
+    pub fn input_passthrough_window_under(
+        &self,
+        pos_within_output: Point<f64, Logical>,
+    ) -> Option<&W> {
+        let (ws, geo) = self.workspace_under(pos_within_output)?;
+
+        if self.overview_progress.is_some() {
+            let zoom = self.overview_zoom();
+            let pos_within_workspace = (pos_within_output - geo.loc).downscale(zoom);
+            ws.input_passthrough_window_under(pos_within_workspace)
+        } else {
+            ws.input_passthrough_window_under(pos_within_output - geo.loc)
+        }
+    }
+
     pub(super) fn insert_position(
         &self,
         pos_within_output: Point<f64, Logical>,

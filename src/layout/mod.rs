@@ -244,6 +244,12 @@ pub trait LayoutElement {
     fn set_bounds(&self, bounds: Size<i32, Logical>);
     fn is_ignoring_opacity_window_rule(&self) -> bool;
 
+    /// Whether this element is transparent to pointer input (can't be focused, events pass
+    /// through).
+    fn is_input_passthrough(&self) -> bool {
+        false
+    }
+
     fn is_urgent(&self) -> bool;
 
     fn configure_intent(&self) -> ConfigureIntent;
@@ -393,6 +399,7 @@ pub struct Options {
     pub gestures: niri_config::Gestures,
     pub overview: niri_config::Overview,
     pub blur: niri_config::Blur,
+    pub floating_windows_hidden: bool,
     // Debug flags.
     pub disable_resize_throttling: bool,
     pub disable_transactions: bool,
@@ -654,6 +661,7 @@ impl Options {
             gestures: config.gestures,
             overview: config.overview,
             blur: config.blur,
+            floating_windows_hidden: false,
             disable_resize_throttling: config.debug.disable_resize_throttling,
             disable_transactions: config.debug.disable_transactions,
             deactivate_unfocused_windows: config.debug.deactivate_unfocused_windows,
@@ -2332,6 +2340,15 @@ impl<W: LayoutElement> Layout<W> {
         mon.window_under(pos_within_output)
     }
 
+    pub fn input_passthrough_window_under(
+        &self,
+        output: &Output,
+        pos_within_output: Point<f64, Logical>,
+    ) -> Option<&W> {
+        let mon = self.monitor_for_output(output)?;
+        mon.input_passthrough_window_under(pos_within_output)
+    }
+
     pub fn resize_edges_under(
         &self,
         output: &Output,
@@ -2986,6 +3003,11 @@ impl<W: LayoutElement> Layout<W> {
         self.options = options;
     }
 
+    pub fn set_floating_windows_hidden(&mut self, hidden: bool) {
+        let mut options = (*self.options).clone();
+        options.floating_windows_hidden = hidden;
+        self.update_options(options);
+    }
     pub fn toggle_width(&mut self, forwards: bool) {
         let Some(workspace) = self.active_workspace_mut() else {
             return;
@@ -4840,7 +4862,7 @@ impl<W: LayoutElement> Layout<W> {
             });
     }
 
-    pub fn refresh(&mut self, is_active: bool) {
+    pub fn refresh(&mut self, is_active: bool, hidden_input_passthrough_window: Option<&W::Id>) {
         let _span = tracy_client::span!("Layout::refresh");
 
         self.is_active = is_active;
@@ -4894,7 +4916,7 @@ impl<W: LayoutElement> Layout<W> {
 
                     for (ws_idx, ws) in mon.workspaces.iter_mut().enumerate() {
                         let is_focused = is_active && ws_idx == mon.active_workspace_idx;
-                        ws.refresh(is_active, is_focused);
+                        ws.refresh(is_active, is_focused, hidden_input_passthrough_window);
 
                         if let Some(is_scrolling) = ongoing_scrolling_dnd {
                             // Lock or unlock the view for scrolling interactive move.
@@ -4914,7 +4936,7 @@ impl<W: LayoutElement> Layout<W> {
             }
             MonitorSet::NoOutputs { workspaces, .. } => {
                 for ws in workspaces {
-                    ws.refresh(false, false);
+                    ws.refresh(false, false, None);
                     ws.view_offset_gesture_end(None);
                 }
             }

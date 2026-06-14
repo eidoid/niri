@@ -475,6 +475,7 @@ fn action_name(action: &Action) -> String {
         Action::ConsumeOrExpelWindowLeft => String::from("Consume or Expel Window Left"),
         Action::ConsumeOrExpelWindowRight => String::from("Consume or Expel Window Right"),
         Action::ToggleWindowFloating => String::from("Move Window Between Floating and Tiling"),
+        Action::ToggleWindowRuleInputPassthrough => String::from("Toggle Window Input Passthrough"),
         Action::SwitchFocusBetweenFloatingAndTiling => {
             String::from("Switch Focus Between Floating and Tiling")
         }

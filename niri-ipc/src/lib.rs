@@ -837,6 +837,8 @@ pub enum Action {
     FocusTiling {},
     /// Toggles the focus between the floating and the tiling layout.
     SwitchFocusBetweenFloatingAndTiling {},
+    /// Toggle visibility of all floating windows.
+    ToggleFloatingWindows {},
     /// Move a floating window on screen.
     #[cfg_attr(feature = "clap", clap(about = "Move the floating window on screen"))]
     MoveFloatingWindow {
@@ -869,6 +871,18 @@ pub enum Action {
         /// Id of the window.
         ///
         /// If `None`, uses the focused window.
+        #[cfg_attr(feature = "clap", arg(long))]
+        id: Option<u64>,
+    },
+    /// Toggle input passthrough of windows with an input-passthrough window rule.
+    #[cfg_attr(
+        feature = "clap",
+        clap(about = "Toggle input passthrough of windows with an input-passthrough window rule")
+    )]
+    ToggleWindowRuleInputPassthrough {
+        /// Id of the window.
+        ///
+        /// If `None`, toggles all windows with an input-passthrough window rule.
         #[cfg_attr(feature = "clap", arg(long))]
         id: Option<u64>,
     },

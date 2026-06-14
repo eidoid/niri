@@ -346,6 +346,14 @@ window-rule {
     clip-to-geometry true
 }
 
+// Example: make a window transparent to mouse input.
+// The window will not be focusable, and mouse events will pass through
+// to windows underneath it.
+/-window-rule {
+    match app-id="my-overlay-app"
+    input-passthrough true
+}
+
 binds {
     // Keys consist of modifiers separated by + signs, followed by an XKB key name
     // in the end. To find an XKB name for a particular key, you may use a program

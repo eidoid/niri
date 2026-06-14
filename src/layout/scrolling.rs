@@ -2983,10 +2983,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     scale,
                     pos - col_pos,
                 ) {
-                    let hit = HitType::Activate {
-                        is_tab_indicator: true,
-                    };
-                    return Some((col.tiles[idx].window(), hit));
+                    if !col.tiles[idx].window().is_input_passthrough() {
+                        let hit = HitType::Activate {
+                            is_tab_indicator: true,
+                        };
+                        return Some((col.tiles[idx].window(), hit));
+                    }
                 }
             }
 
@@ -3001,7 +3003,34 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 let tile_pos = tile_pos.to_physical_precise_round(scale).to_logical(scale);
 
                 if let Some(rv) = HitType::hit_tile(tile, tile_pos, pos) {
-                    return Some(rv);
+                    if !tile.window().is_input_passthrough() {
+                        return Some(rv);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn input_passthrough_window_under(&self, pos: Point<f64, Logical>) -> Option<&W> {
+        let scale = self.scale;
+        let view_off = Point::from((-self.view_pos(), 0.));
+        for (col, col_x) in self.columns_in_render_order() {
+            let col_off = Point::from((col_x, 0.));
+            let col_render_off = col.render_offset();
+
+            for (tile, tile_off, visible) in col.tiles_in_render_order() {
+                if !visible || !tile.window().is_input_passthrough() {
+                    continue;
+                }
+
+                let tile_pos =
+                    view_off + col_off + col_render_off + tile_off + tile.render_offset();
+                let tile_pos = tile_pos.to_physical_precise_round(scale).to_logical(scale);
+
+                if HitType::hit_tile(tile, tile_pos, pos).is_some() {
+                    return Some(tile.window());
                 }
             }
         }
@@ -3629,7 +3658,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         self.interactive_resize = None;
     }
 
-    pub fn refresh(&mut self, is_active: bool, is_focused: bool) {
+    pub fn refresh(
+        &mut self,
+        is_active: bool,
+        is_focused: bool,
+        hidden_input_passthrough_window: Option<&W::Id>,
+    ) {
         for (col_idx, col) in self.columns.iter_mut().enumerate() {
             let mut col_resize_data = None;
             if let Some(resize) = &self.interactive_resize {
@@ -3709,6 +3743,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                 }
 
                 win.refresh();
+
+                let hidden =
+                    hidden_input_passthrough_window == Some(win.id()) && win.is_input_passthrough();
+                tile.set_input_passthrough_hidden(hidden);
             }
         }
     }

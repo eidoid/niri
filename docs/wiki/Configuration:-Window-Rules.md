@@ -637,6 +637,25 @@ window-rule {
 }
 ```
 
+#### `input-passthrough`
+
+Make the window transparent to pointer input.
+The window will not be focusable with the pointer, and pointer events will pass through to windows underneath it.
+
+When the pointer is over an input-passthrough window, niri hides the whole window so the contents underneath are visible.
+
+Input passthrough can be temporarily toggled off and back on using the [`toggle-window-rule-input-passthrough`](./Configuration:-Key-Bindings.md#toggle-window-rule-input-passthrough) action.
+This only has an effect for windows that already have `input-passthrough true` from a window rule.
+
+```kdl
+// Make an overlay window pass pointer input through.
+window-rule {
+    match app-id="my-overlay-app"
+
+    input-passthrough true
+}
+```
+
 #### `default-column-display`
 
 <sup>Since: 25.02</sup>

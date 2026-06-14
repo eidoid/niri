@@ -349,6 +349,27 @@ binds {
 }
 ```
 
+#### `toggle-window-rule-input-passthrough`
+
+Toggle input passthrough for windows with `input-passthrough true` set through a window rule.
+Without a window id, this toggles all such windows.
+
+```kdl
+binds {
+    Mod+I { toggle-window-rule-input-passthrough; }
+}
+```
+
+#### `toggle-floating-windows`
+
+Hide or show all floating windows.
+
+```kdl
+binds {
+    Mod+F { toggle-floating-windows; }
+}
+```
+
 #### `screenshot`, `screenshot-screen`, `screenshot-window`
 
 Actions for taking screenshots.

@@ -377,11 +377,11 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn update_render_elements(&mut self, is_active: bool) {
         self.scrolling
-            .update_render_elements(is_active && !self.floating_is_active.get());
+            .update_render_elements(is_active && !self.floating_is_active());
 
         let view_rect = Rectangle::from_size(self.view_size);
         self.floating
-            .update_render_elements(is_active && self.floating_is_active.get(), view_rect);
+            .update_render_elements(is_active && self.floating_is_active(), view_rect);
 
         self.shadow.update_render_elements(
             self.view_size,
@@ -469,7 +469,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn active_window(&self) -> Option<&W> {
-        if self.floating_is_active.get() {
+        if self.floating_is_active() {
             self.floating.active_window()
         } else {
             self.scrolling.active_window()
@@ -477,7 +477,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn active_window_mut(&mut self) -> Option<&mut W> {
-        if self.floating_is_active.get() {
+        if self.floating_is_active() {
             self.floating.active_window_mut()
         } else {
             self.scrolling.active_window_mut()
@@ -1610,7 +1610,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn active_window_visual_rectangle(&self) -> Option<Rectangle<f64, Logical>> {
-        if self.floating_is_active.get() {
+        if self.floating_is_active() {
             self.floating.active_window_visual_rectangle()
         } else {
             self.scrolling.active_window_visual_rectangle()
@@ -1680,6 +1680,10 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn is_floating_visible(&self) -> bool {
+        if self.options.floating_windows_hidden {
+            return false;
+        }
+
         // If the focus is on a fullscreen scrolling window, hide the floating windows.
         matches!(
             self.floating_is_active,
@@ -1756,10 +1760,16 @@ impl<W: LayoutElement> Workspace<W> {
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<(&W, HitType)> {
         // This logic is consistent with tiles_with_render_positions().
         if self.is_floating_visible() {
-            if let Some(rv) = self
-                .floating
-                .tiles_with_render_positions()
-                .find_map(|(tile, tile_pos)| HitType::hit_tile(tile, tile_pos, pos))
+            if let Some(rv) =
+                self.floating
+                    .tiles_with_render_positions()
+                    .find_map(|(tile, tile_pos)| {
+                        let hit = HitType::hit_tile(tile, tile_pos, pos)?;
+                        if tile.window().is_input_passthrough() {
+                            return None;
+                        }
+                        Some(hit)
+                    })
             {
                 return Some(rv);
             }
@@ -1768,12 +1778,26 @@ impl<W: LayoutElement> Workspace<W> {
         self.scrolling.window_under(pos)
     }
 
+    pub fn input_passthrough_window_under(&self, pos: Point<f64, Logical>) -> Option<&W> {
+        if self.is_floating_visible() {
+            if let Some(window) = self.floating.input_passthrough_window_under(pos) {
+                return Some(window);
+            }
+        }
+
+        self.scrolling.input_passthrough_window_under(pos)
+    }
+
     pub fn resize_edges_under(&self, pos: Point<f64, Logical>) -> Option<ResizeEdge> {
         self.tiles_with_render_positions()
             .find_map(|(tile, tile_pos, visible)| {
                 // This logic should be consistent with window_under() in when it returns Some vs.
                 // None.
                 if !visible {
+                    return None;
+                }
+
+                if tile.window().is_input_passthrough() {
                     return None;
                 }
 
@@ -1810,11 +1834,22 @@ impl<W: LayoutElement> Workspace<W> {
         }
     }
 
-    pub fn refresh(&mut self, is_active: bool, is_focused: bool) {
-        self.scrolling
-            .refresh(is_active && !self.floating_is_active.get(), is_focused);
-        self.floating
-            .refresh(is_active && self.floating_is_active.get(), is_focused);
+    pub fn refresh(
+        &mut self,
+        is_active: bool,
+        is_focused: bool,
+        hidden_input_passthrough_window: Option<&W::Id>,
+    ) {
+        self.scrolling.refresh(
+            is_active && !self.floating_is_active.get(),
+            is_focused,
+            hidden_input_passthrough_window,
+        );
+        self.floating.refresh(
+            is_active && self.floating_is_active.get(),
+            is_focused,
+            hidden_input_passthrough_window,
+        );
     }
 
     pub fn scroll_amount_to_activate(&self, window: &W::Id) -> f64 {
@@ -1959,7 +1994,7 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn floating_is_active(&self) -> bool {
-        self.floating_is_active.get()
+        self.floating_is_active.get() && !self.options.floating_windows_hidden
     }
 
     pub fn floating_logical_to_size_frac(

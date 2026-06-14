@@ -2193,6 +2193,21 @@ impl State {
                 // FIXME: granular
                 self.niri.queue_redraw_all();
             }
+            Action::ToggleFloatingWindows => {
+                let hidden = !self.niri.floating_windows_hidden;
+                self.niri.floating_windows_hidden = hidden;
+                self.niri.layout.set_floating_windows_hidden(hidden);
+                if hidden {
+                    self.niri.layout.focus_tiling();
+                } else {
+                    self.niri.layout.focus_floating();
+                }
+                self.update_keyboard_focus();
+                self.update_pointer_contents();
+                // FIXME: granular
+                self.niri.queue_redraw_all();
+                info!(hidden, "toggled floating window visibility");
+            }
             Action::MoveFloatingWindowById { id, x, y } => {
                 let window = if let Some(id) = id {
                     let window = self.niri.layout.windows().find(|(_, m)| m.id().get() == id);
@@ -2234,6 +2249,41 @@ impl State {
                 if let Some(window) = window {
                     if window.rules().opacity.is_some_and(|o| o != 1.) {
                         window.toggle_ignore_opacity_window_rule();
+                        // FIXME: granular
+                        self.niri.queue_redraw_all();
+                    }
+                }
+            }
+            Action::ToggleWindowRuleInputPassthrough => {
+                let mut changed = false;
+                for window in self
+                    .niri
+                    .layout
+                    .workspaces_mut()
+                    .flat_map(|ws| ws.windows_mut())
+                {
+                    if window.rules().input_passthrough == Some(true) {
+                        window.toggle_ignore_input_passthrough_window_rule();
+                        changed = true;
+                    }
+                }
+
+                if changed {
+                    self.update_pointer_contents();
+                    // FIXME: granular
+                    self.niri.queue_redraw_all();
+                }
+            }
+            Action::ToggleWindowRuleInputPassthroughById(id) => {
+                let window = self
+                    .niri
+                    .layout
+                    .workspaces_mut()
+                    .find_map(|ws| ws.windows_mut().find(|w| w.id().get() == id));
+                if let Some(window) = window {
+                    if window.rules().input_passthrough == Some(true) {
+                        window.toggle_ignore_input_passthrough_window_rule();
+                        self.update_pointer_contents();
                         // FIXME: granular
                         self.niri.queue_redraw_all();
                     }

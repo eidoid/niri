@@ -96,6 +96,9 @@ pub struct Tile<W: LayoutElement> {
     /// The animation of the tile's opacity.
     pub(super) alpha_animation: Option<AlphaAnimation>,
 
+    /// Whether this input-passthrough tile is hidden because the pointer is over it.
+    input_passthrough_hidden: bool,
+
     /// Offset during the initial interactive move rubberband.
     pub(super) interactive_move_offset: Point<f64, Logical>,
 
@@ -205,6 +208,7 @@ impl<W: LayoutElement> Tile<W> {
             move_x_animation: None,
             move_y_animation: None,
             alpha_animation: None,
+            input_passthrough_hidden: false,
             interactive_move_offset: Point::from((0., 0.)),
             unmap_snapshot: None,
             rounded_corner_damage: Default::default(),
@@ -661,6 +665,25 @@ impl<W: LayoutElement> Tile<W> {
     pub fn hold_alpha_animation_after_done(&mut self) {
         if let Some(alpha) = &mut self.alpha_animation {
             alpha.hold_after_done = true;
+        }
+    }
+
+    pub fn set_input_passthrough_hidden(&mut self, hidden: bool) {
+        let target = if hidden { 0. } else { 1. };
+        let is_animating_to_target = self
+            .alpha_animation
+            .as_ref()
+            .is_some_and(|alpha| alpha.anim.to() == target);
+
+        if self.input_passthrough_hidden == hidden && (!hidden || is_animating_to_target) {
+            return;
+        }
+
+        self.input_passthrough_hidden = hidden;
+        self.animate_alpha(1., target, self.options.animations.window_movement.0);
+
+        if hidden {
+            self.hold_alpha_animation_after_done();
         }
     }
 

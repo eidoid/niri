@@ -103,6 +103,9 @@ pub struct Mapped {
     /// Whether this window should ignore opacity set through window rules.
     ignore_opacity_window_rule: bool,
 
+    /// Whether this window should ignore input-passthrough set through window rules.
+    ignore_input_passthrough_window_rule: bool,
+
     /// Buffer to draw instead of the window when it should be blocked out.
     block_out_buffer: RefCell<SolidColorBuffer>,
 
@@ -291,6 +294,7 @@ impl Mapped {
             is_floating: false,
             is_window_cast_target: false,
             ignore_opacity_window_rule: false,
+            ignore_input_passthrough_window_rule: false,
             block_out_buffer: RefCell::new(SolidColorBuffer::new((0., 0.), [0., 0., 0., 1.])),
             blur_config: config.blur,
             animate_next_configure: false,
@@ -333,6 +337,9 @@ impl Mapped {
         // flag to reduce surprises down the line.
         if !new_rules.opacity.is_some_and(|o| o < 1.) {
             self.ignore_opacity_window_rule = false;
+        }
+        if new_rules.input_passthrough != Some(true) {
+            self.ignore_input_passthrough_window_rule = false;
         }
 
         self.rules = new_rules;
@@ -385,6 +392,10 @@ impl Mapped {
 
     pub fn toggle_ignore_opacity_window_rule(&mut self) {
         self.ignore_opacity_window_rule = !self.ignore_opacity_window_rule;
+    }
+
+    pub fn toggle_ignore_input_passthrough_window_rule(&mut self) {
+        self.ignore_input_passthrough_window_rule = !self.ignore_input_passthrough_window_rule;
     }
 
     pub fn set_is_focused(&mut self, is_focused: bool) {
@@ -641,6 +652,10 @@ impl LayoutElement for Mapped {
     fn is_in_input_region(&self, point: Point<f64, Logical>) -> bool {
         let surface_local = point + self.window.geometry().loc.to_f64();
         self.window.is_in_input_region(&surface_local)
+    }
+
+    fn is_input_passthrough(&self) -> bool {
+        self.rules.input_passthrough.unwrap_or(false) && !self.ignore_input_passthrough_window_rule
     }
 
     fn render_normal<R: NiriRenderer>(
