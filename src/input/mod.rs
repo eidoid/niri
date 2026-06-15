@@ -112,6 +112,45 @@ impl<D: SeatHandler> PointerOrTouchStartData<D> {
 }
 
 impl State {
+    fn pointer_moved_event(&self, pos: Point<f64, Logical>) -> niri_ipc::Event {
+        let mut windows = Vec::new();
+
+        self.niri
+            .layout
+            .with_windows(|mapped, output, _, window_layout| {
+                let Some(output) = output else {
+                    return;
+                };
+                let Some(tile_pos) = window_layout.tile_pos_in_workspace_view else {
+                    return;
+                };
+                let Some(output_geo) = self.niri.global_space.output_geometry(output) else {
+                    return;
+                };
+
+                let window_x = f64::from(output_geo.loc.x)
+                    + tile_pos.0
+                    + window_layout.window_offset_in_tile.0;
+                let window_y = f64::from(output_geo.loc.y)
+                    + tile_pos.1
+                    + window_layout.window_offset_in_tile.1;
+
+                windows.push(niri_ipc::PointerMovedWindow {
+                    id: mapped.id().get(),
+                    x: pos.x - window_x,
+                    y: pos.y - window_y,
+                    width: window_layout.window_size.0,
+                    height: window_layout.window_size.1,
+                });
+            });
+
+        niri_ipc::Event::PointerMoved {
+            x: pos.x,
+            y: pos.y,
+            windows,
+        }
+    }
+
     pub fn process_input_event<I: InputBackend + 'static>(&mut self, event: InputEvent<I>)
     where
         I::Device: 'static, // Needed for downcasting.
@@ -2647,6 +2686,10 @@ impl State {
             }
         }
 
+        if let Some(server) = &self.niri.ipc_server {
+            server.send_event(self.pointer_moved_event(new_pos));
+        }
+
         self.niri.handle_focus_follows_mouse(&under);
 
         self.niri.pointer_contents.clone_from(&under);
@@ -2740,6 +2783,10 @@ impl State {
                     self.niri.window_mru_ui.pointer_motion(pos_within_output);
                 }
             }
+        }
+
+        if let Some(server) = &self.niri.ipc_server {
+            server.send_event(self.pointer_moved_event(pos));
         }
 
         let under = self.niri.contents_under(pos);

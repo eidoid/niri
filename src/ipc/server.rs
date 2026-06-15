@@ -112,7 +112,7 @@ impl IpcServer {
         })
     }
 
-    fn send_event(&self, event: Event) {
+    pub(crate) fn send_event(&self, event: Event) {
         let mut streams = self.event_streams.borrow_mut();
         let mut to_remove = Vec::new();
         for (idx, stream) in streams.iter_mut().enumerate() {

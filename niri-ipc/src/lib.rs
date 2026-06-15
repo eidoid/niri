@@ -1617,6 +1617,15 @@ pub enum CastTarget {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Event {
+    /// Pointer moved in global compositor logical coordinates.
+    PointerMoved {
+        /// X coordinate in the global compositor space.
+        x: f64,
+        /// Y coordinate in the global compositor space.
+        y: f64,
+        /// Pointer coordinates relative to currently laid-out windows.
+        windows: Vec<PointerMovedWindow>,
+    },
     /// The workspace configuration has changed.
     WorkspacesChanged {
         /// The new workspace configuration.
@@ -1753,6 +1762,22 @@ pub enum Event {
         /// Stream ID of the stopped screencast.
         stream_id: u64,
     },
+}
+
+/// Pointer coordinates relative to a window.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+pub struct PointerMovedWindow {
+    /// ID of the window.
+    pub id: u64,
+    /// X coordinate relative to the window's visual geometry.
+    pub x: f64,
+    /// Y coordinate relative to the window's visual geometry.
+    pub y: f64,
+    /// Width of the window's visual geometry.
+    pub width: i32,
+    /// Height of the window's visual geometry.
+    pub height: i32,
 }
 
 impl From<Duration> for Timestamp {

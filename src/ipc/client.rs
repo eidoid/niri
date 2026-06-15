@@ -428,6 +428,9 @@ pub fn handle_msg(mut msg: Msg, json: bool) -> anyhow::Result<()> {
                 }
 
                 match event {
+                    Event::PointerMoved { x, y, .. } => {
+                        println!("Pointer moved: x={x}, y={y}");
+                    }
                     Event::WorkspacesChanged { workspaces } => {
                         println!("Workspaces changed: {workspaces:?}");
                     }
