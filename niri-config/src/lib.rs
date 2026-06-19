@@ -888,6 +888,7 @@ mod tests {
                 open-fullscreen false
                 open-floating false
                 open-focused true
+                pin-on-top true
                 default-window-height { fixed 500; }
                 default-column-display "tabbed"
                 default-floating-position x=100 y=-200 relative-to="bottom-left"
@@ -1882,6 +1883,10 @@ mod tests {
                     ),
                     scroll_factor: None,
                     tiled_state: None,
+                    input_passthrough: None,
+                    pin_on_top: Some(
+                        true,
+                    ),
                     background_effect: BackgroundEffectRule {
                         xray: None,
                         blur: None,

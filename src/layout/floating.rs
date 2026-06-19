@@ -309,6 +309,18 @@ impl<W: LayoutElement> FloatingSpace<W> {
         })
     }
 
+    pub fn tiles_with_render_positions_pinned_on_top(
+        &self,
+    ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>)> {
+        let pinned = self
+            .tiles_with_render_positions()
+            .filter(|(tile, _)| tile.window().rules().pin_on_top == Some(true));
+        let unpinned = self
+            .tiles_with_render_positions()
+            .filter(|(tile, _)| tile.window().rules().pin_on_top != Some(true));
+        pinned.chain(unpinned)
+    }
+
     pub fn tiles_with_render_positions_mut(
         &mut self,
         round: bool,
@@ -1058,10 +1070,23 @@ impl<W: LayoutElement> FloatingSpace<W> {
 
     pub fn render<R: NiriRenderer>(
         &self,
+        ctx: RenderCtx<R>,
+        xray_pos: XrayPos,
+        view_rect: Rectangle<f64, Logical>,
+        focus_ring: bool,
+        push: &mut dyn FnMut(FloatingSpaceRenderElement<R>),
+    ) {
+        self.render_filtered(ctx, xray_pos, view_rect, focus_ring, true, |_| true, push);
+    }
+
+    pub fn render_filtered<R: NiriRenderer>(
+        &self,
         mut ctx: RenderCtx<R>,
         xray_pos: XrayPos,
         view_rect: Rectangle<f64, Logical>,
         focus_ring: bool,
+        render_closing_windows: bool,
+        include: impl Fn(&Tile<W>) -> bool,
         push: &mut dyn FnMut(FloatingSpaceRenderElement<R>),
     ) {
         let scale = Scale::from(self.scale);
@@ -1069,13 +1094,19 @@ impl<W: LayoutElement> FloatingSpace<W> {
         // Draw the closing windows on top of the other windows.
         //
         // FIXME: I guess this should rather preserve the stacking order when the window is closed.
-        for closing in self.closing_windows.iter().rev() {
-            let elem = closing.render(ctx.as_gles(), view_rect, scale);
-            push(elem.into());
+        if render_closing_windows {
+            for closing in self.closing_windows.iter().rev() {
+                let elem = closing.render(ctx.as_gles(), view_rect, scale);
+                push(elem.into());
+            }
         }
 
         let active = self.active_window_id.clone();
-        for (tile, tile_pos) in self.tiles_with_render_positions() {
+        for (tile, tile_pos) in self.tiles_with_render_positions_pinned_on_top() {
+            if !include(tile) {
+                continue;
+            }
+
             // For the active tile, draw the focus ring.
             let focus_ring = focus_ring && Some(tile.window().id()) == active.as_ref();
 

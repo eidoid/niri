@@ -123,6 +123,9 @@ pub struct ResolvedWindowRules {
     /// Whether this window is transparent to input (cannot be focused, clicks pass through).
     pub input_passthrough: Option<bool>,
 
+    /// Whether this floating window should render above fullscreen and other floating windows.
+    pub pin_on_top: Option<bool>,
+
     /// Background effect configuration.
     pub background_effect: BackgroundEffect,
 
@@ -307,6 +310,9 @@ impl ResolvedWindowRules {
                 }
                 if let Some(x) = rule.input_passthrough {
                     resolved.input_passthrough = Some(x);
+                }
+                if let Some(x) = rule.pin_on_top {
+                    resolved.pin_on_top = Some(x);
                 }
 
                 resolved

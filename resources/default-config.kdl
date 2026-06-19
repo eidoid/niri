@@ -325,6 +325,8 @@ window-rule {
     // - Flatpak Firefox (app-id is "org.mozilla.firefox")
     match app-id=r#"firefox$"# title="^Picture-in-Picture$"
     open-floating true
+    // If you want PiP windows above fullscreen, uncomment this:
+    // pin-on-top true
 }
 
 // Example: block out two password managers from screen capture.

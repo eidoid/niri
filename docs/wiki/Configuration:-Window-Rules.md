@@ -99,6 +99,7 @@ window-rule {
     clip-to-geometry true
     tiled-state true
     baba-is-float true
+    pin-on-top true
 
     background-effect {
         xray true
@@ -653,6 +654,22 @@ window-rule {
     match app-id="my-overlay-app"
 
     input-passthrough true
+}
+```
+
+#### `pin-on-top`
+
+For floating windows, render this window above fullscreen windows and above other floating windows.
+
+This only changes stacking for windows that are currently in the floating layout.
+
+```kdl
+// Keep a floating overlay visible above fullscreen windows.
+window-rule {
+    match app-id="my-overlay-app"
+
+    open-floating true
+    pin-on-top true
 }
 ```
 

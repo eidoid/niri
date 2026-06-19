@@ -1587,9 +1587,11 @@ impl<W: LayoutElement> Workspace<W> {
     ) -> impl Iterator<Item = (&Tile<W>, Point<f64, Logical>, bool)> {
         let scrolling = self.scrolling.tiles_with_render_positions();
 
-        let floating = self.floating.tiles_with_render_positions();
-        let visible = self.is_floating_visible();
-        let floating = floating.map(move |(tile, pos)| (tile, pos, visible));
+        let floating = self.floating.tiles_with_render_positions_pinned_on_top();
+        let floating = floating.map(move |(tile, pos)| {
+            let visible = self.is_floating_tile_visible(tile);
+            (tile, pos, visible)
+        });
 
         floating.chain(scrolling)
     }
@@ -1641,21 +1643,39 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn render_floating<R: NiriRenderer>(
         &self,
-        ctx: RenderCtx<R>,
+        mut ctx: RenderCtx<R>,
         xray_pos: XrayPos,
         focus_ring: bool,
         push: &mut dyn FnMut(WorkspaceRenderElement<R>),
     ) {
-        if !self.is_floating_visible() {
+        if self.options.floating_windows_hidden {
             return;
         }
 
         let view_rect = Rectangle::from_size(self.view_size);
         let floating_focus_ring = focus_ring && self.floating_is_active();
-        self.floating
-            .render(ctx, xray_pos, view_rect, floating_focus_ring, &mut |elem| {
-                push(elem.into())
-            });
+        let is_floating_visible = self.is_floating_visible();
+        self.floating.render_filtered(
+            ctx.r(),
+            xray_pos,
+            view_rect,
+            floating_focus_ring,
+            is_floating_visible,
+            |tile| tile.window().rules().pin_on_top == Some(true),
+            &mut |elem| push(elem.into()),
+        );
+
+        if is_floating_visible {
+            self.floating.render_filtered(
+                ctx.r(),
+                xray_pos,
+                view_rect,
+                floating_focus_ring,
+                false,
+                |tile| tile.window().rules().pin_on_top != Some(true),
+                &mut |elem| push(elem.into()),
+            );
+        }
     }
 
     pub fn render_shadow<R: NiriRenderer>(
@@ -1689,6 +1709,14 @@ impl<W: LayoutElement> Workspace<W> {
             self.floating_is_active,
             FloatingActive::Yes | FloatingActive::NoButRaised
         ) || !self.render_above_top_layer()
+    }
+
+    fn is_floating_tile_visible(&self, tile: &Tile<W>) -> bool {
+        if self.options.floating_windows_hidden {
+            return false;
+        }
+
+        self.is_floating_visible() || tile.window().rules().pin_on_top == Some(true)
     }
 
     pub fn store_unmap_snapshot_if_empty(
@@ -1759,19 +1787,19 @@ impl<W: LayoutElement> Workspace<W> {
 
     pub fn window_under(&self, pos: Point<f64, Logical>) -> Option<(&W, HitType)> {
         // This logic is consistent with tiles_with_render_positions().
-        if self.is_floating_visible() {
-            if let Some(rv) =
-                self.floating
-                    .tiles_with_render_positions()
-                    .find_map(|(tile, tile_pos)| {
-                        let hit = HitType::hit_tile(tile, tile_pos, pos)?;
-                        if tile.window().is_input_passthrough() {
-                            return None;
-                        }
-                        Some(hit)
-                    })
-            {
-                return Some(rv);
+        if !self.options.floating_windows_hidden {
+            for (tile, tile_pos) in self.floating.tiles_with_render_positions_pinned_on_top() {
+                if !self.is_floating_tile_visible(tile) {
+                    continue;
+                }
+
+                let Some(hit) = HitType::hit_tile(tile, tile_pos, pos) else {
+                    continue;
+                };
+
+                if !tile.window().is_input_passthrough() {
+                    return Some(hit);
+                }
             }
         }
 
@@ -1779,9 +1807,15 @@ impl<W: LayoutElement> Workspace<W> {
     }
 
     pub fn input_passthrough_window_under(&self, pos: Point<f64, Logical>) -> Option<&W> {
-        if self.is_floating_visible() {
-            if let Some(window) = self.floating.input_passthrough_window_under(pos) {
-                return Some(window);
+        if !self.options.floating_windows_hidden {
+            for (tile, tile_pos) in self.floating.tiles_with_render_positions_pinned_on_top() {
+                if !self.is_floating_tile_visible(tile) || !tile.window().is_input_passthrough() {
+                    continue;
+                }
+
+                if HitType::hit_tile(tile, tile_pos, pos).is_some() {
+                    return Some(tile.window());
+                }
             }
         }
 

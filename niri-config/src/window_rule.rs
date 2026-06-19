@@ -77,6 +77,8 @@ pub struct WindowRule {
     pub tiled_state: Option<bool>,
     #[knuffel(child, unwrap(argument))]
     pub input_passthrough: Option<bool>,
+    #[knuffel(child, unwrap(argument))]
+    pub pin_on_top: Option<bool>,
     #[knuffel(child, default)]
     pub background_effect: BackgroundEffectRule,
     #[knuffel(child, default)]
