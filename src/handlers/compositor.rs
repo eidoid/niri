@@ -40,9 +40,12 @@ impl CompositorHandler for State {
         while let Some(parent) = get_parent(&root) {
             root = parent;
         }
+        let root = self.niri.find_root_shell_surface(&root);
 
         if let Some(output) = self.niri.output_for_root(&root) {
-            let scale = output.current_scale();
+            let scale = self
+                .niri
+                .preferred_scale_for_root(&root, output.current_scale());
             let transform = output.current_transform();
             with_states(surface, |data| {
                 send_scale_transform(surface, data, scale, transform);

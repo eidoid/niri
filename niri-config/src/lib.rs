@@ -889,6 +889,7 @@ mod tests {
                 open-floating false
                 open-focused true
                 pin-on-top true
+                scale 1.5
                 default-window-height { fixed 500; }
                 default-column-display "tabbed"
                 default-floating-position x=100 y=-200 relative-to="bottom-left"
@@ -1805,6 +1806,11 @@ mod tests {
                     min_height: None,
                     max_width: None,
                     max_height: None,
+                    scale: Some(
+                        FloatOrInt(
+                            1.5,
+                        ),
+                    ),
                     focus_ring: BorderRule {
                         off: true,
                         on: false,

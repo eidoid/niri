@@ -1205,13 +1205,17 @@ impl State {
             match popup {
                 PopupKind::Xdg(ref popup) => {
                     if !popup.is_initial_configure_sent() {
-                        if let Some(output) = self.output_for_popup(&PopupKind::Xdg(popup.clone()))
-                        {
-                            let scale = output.current_scale();
-                            let transform = output.current_transform();
-                            with_states(surface, |data| {
-                                send_scale_transform(surface, data, scale, transform);
-                            });
+                        let popup_kind = PopupKind::Xdg(popup.clone());
+                        if let Ok(root) = find_popup_root_surface(&popup_kind) {
+                            if let Some(output) = self.niri.output_for_root(&root) {
+                                let scale = self
+                                    .niri
+                                    .preferred_scale_for_root(&root, output.current_scale());
+                                let transform = output.current_transform();
+                                with_states(surface, |data| {
+                                    send_scale_transform(surface, data, scale, transform);
+                                });
+                            }
                         }
                         popup.send_configure().expect("initial configure failed");
                     }
@@ -1374,8 +1378,19 @@ impl State {
                 WindowRef::Unmapped(unmapped),
                 self.niri.is_at_startup,
             );
-            if let InitialConfigureState::Configured { rules, .. } = &mut unmapped.state {
+            if let InitialConfigureState::Configured { rules, output, .. } = &mut unmapped.state {
+                let scale_changed = rules.scale != new_rules.scale;
                 *rules = new_rules;
+
+                if scale_changed {
+                    if let Some(output) = output {
+                        let scale = rules.preferred_scale(output.current_scale());
+                        let transform = output.current_transform();
+                        unmapped.window.with_surfaces(|surface, data| {
+                            send_scale_transform(surface, data, scale, transform);
+                        });
+                    }
+                }
             }
         } else if let Some((mapped, output)) = self
             .niri

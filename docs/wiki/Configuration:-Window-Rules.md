@@ -52,6 +52,7 @@ window-rule {
     // Properties that apply continuously.
     draw-border-with-background false
     opacity 0.5
+    scale 1.5
     block-out-from "screencast"
     // block-out-from "screen-capture"
     variable-refresh-rate true
@@ -615,6 +616,26 @@ window-rule {
     match is-active=false
 
     opacity 0.95
+}
+```
+
+#### `scale`
+
+Override the scale advertised to the window and its pop-ups.
+By default, windows receive the scale of the output they are on.
+
+This is an absolute override rather than a multiplier.
+For example, a window with `scale 1.5` receives a preferred fractional scale of 1.5 even when it is on an output with scale 2.
+The window's logical size and its size in the layout do not change.
+
+Clients that do not support fractional scaling receive the scale rounded up to the nearest integer.
+Rendering may appear blurry when the window scale differs from the output scale because the window buffer needs to be scaled for display.
+
+```kdl
+window-rule {
+    match app-id="^org\\.example\\.App$"
+
+    scale 1.5
 }
 ```
 

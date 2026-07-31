@@ -853,8 +853,9 @@ impl<W: LayoutElement> Workspace<W> {
         is_floating: bool,
         rules: &ResolvedWindowRules,
     ) {
+        let scale = rules.preferred_scale(self.scale);
         window.with_surfaces(|surface, data| {
-            send_scale_transform(surface, data, self.scale, self.transform);
+            send_scale_transform(surface, data, scale, self.transform);
         });
 
         let toplevel = window.toplevel().expect("no x11 support");

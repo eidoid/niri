@@ -3012,6 +3012,25 @@ impl Niri {
 
         self.layout.update_output_size(output);
 
+        for unmapped in self.unmapped_windows.values() {
+            let InitialConfigureState::Configured {
+                rules,
+                output: Some(window_output),
+                ..
+            } = &unmapped.state
+            else {
+                continue;
+            };
+            if window_output != output {
+                continue;
+            }
+
+            let scale = rules.preferred_scale(scale);
+            unmapped.window.with_surfaces(|surface, data| {
+                send_scale_transform(surface, data, scale, transform);
+            });
+        }
+
         if let Some(state) = self.output_state.get_mut(output) {
             state.backdrop_buffer.resize(output_size);
 
@@ -3662,6 +3681,25 @@ impl Niri {
                 .is_some()
         };
         self.layout.outputs().find(has_layer_surface)
+    }
+
+    /// Returns the scale to advertise to a surface tree rooted at `root`.
+    pub fn preferred_scale_for_root(
+        &self,
+        root: &WlSurface,
+        output_scale: output::Scale,
+    ) -> output::Scale {
+        if let Some((mapped, _)) = self.layout.find_window_and_output(root) {
+            return mapped.rules().preferred_scale(output_scale);
+        }
+
+        if let Some(unmapped) = self.unmapped_windows.get(root) {
+            if let InitialConfigureState::Configured { rules, .. } = &unmapped.state {
+                return rules.preferred_scale(output_scale);
+            }
+        }
+
+        output_scale
     }
 
     pub fn lock_surface_focus(&self) -> Option<WlSurface> {
@@ -6356,8 +6394,20 @@ impl Niri {
                     WindowRef::Unmapped(unmapped),
                     self.is_at_startup,
                 );
-                if let InitialConfigureState::Configured { rules, .. } = &mut unmapped.state {
+                if let InitialConfigureState::Configured { rules, output, .. } = &mut unmapped.state
+                {
+                    let scale_changed = rules.scale != new_rules.scale;
                     *rules = new_rules;
+
+                    if scale_changed {
+                        if let Some(output) = output {
+                            let scale = rules.preferred_scale(output.current_scale());
+                            let transform = output.current_transform();
+                            unmapped.window.with_surfaces(|surface, data| {
+                                send_scale_transform(surface, data, scale, transform);
+                            });
+                        }
+                    }
                 }
             }
 

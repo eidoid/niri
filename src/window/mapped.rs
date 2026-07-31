@@ -69,6 +69,12 @@ pub struct Mapped {
     /// immediately, rather than setting this flag.
     need_to_recompute_rules: bool,
 
+    /// Output scale and transform most recently applied to this window.
+    ///
+    /// The scale is kept in its output form so removing a window-rule override can immediately
+    /// restore the correct output scale without waiting for an output update.
+    preferred_scale_transform: Cell<Option<(output::Scale, Transform)>>,
+
     /// Whether this window needs a configure this loop cycle.
     ///
     /// Certain Wayland requests require a configure in response, like un/fullscreen.
@@ -285,6 +291,7 @@ impl Mapped {
             pre_commit_hook: hook,
             rules,
             need_to_recompute_rules: false,
+            preferred_scale_transform: Cell::new(None),
             needs_configure: false,
             needs_frame_callback: false,
             offscreen_data: RefCell::new(None),
@@ -333,6 +340,8 @@ impl Mapped {
             return false;
         }
 
+        let scale_changed = new_rules.scale != self.rules.scale;
+
         // If the opacity window rule no longer makes the window semitransparent, reset the ignore
         // flag to reduce surprises down the line.
         if !new_rules.opacity.is_some_and(|o| o < 1.) {
@@ -343,7 +352,23 @@ impl Mapped {
         }
 
         self.rules = new_rules;
+        if scale_changed {
+            self.resend_preferred_scale_transform();
+        }
         true
+    }
+
+    fn send_preferred_scale_transform(&self, output_scale: output::Scale, transform: Transform) {
+        let scale = self.rules.preferred_scale(output_scale);
+        self.window.with_surfaces(|surface, data| {
+            send_scale_transform(surface, data, scale, transform);
+        });
+    }
+
+    fn resend_preferred_scale_transform(&self) {
+        if let Some((scale, transform)) = self.preferred_scale_transform.get() {
+            self.send_preferred_scale_transform(scale, transform);
+        }
     }
 
     pub fn recompute_window_rules_if_needed(
@@ -935,9 +960,8 @@ impl LayoutElement for Mapped {
     }
 
     fn set_preferred_scale_transform(&self, scale: output::Scale, transform: Transform) {
-        self.window.with_surfaces(|surface, data| {
-            send_scale_transform(surface, data, scale, transform);
-        });
+        self.preferred_scale_transform.set(Some((scale, transform)));
+        self.send_preferred_scale_transform(scale, transform);
     }
 
     fn has_ssd(&self) -> bool {

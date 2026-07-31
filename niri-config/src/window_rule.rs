@@ -44,6 +44,8 @@ pub struct WindowRule {
     pub max_width: Option<u16>,
     #[knuffel(child, unwrap(argument))]
     pub max_height: Option<u16>,
+    #[knuffel(child, unwrap(argument))]
+    pub scale: Option<FloatOrInt<0, 10>>,
 
     #[knuffel(child, default)]
     pub focus_ring: BorderRule,

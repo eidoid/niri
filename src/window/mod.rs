@@ -7,6 +7,7 @@ use niri_config::{
     ResolvedPopupsRules, ShadowRule, TabIndicatorRule,
 };
 use niri_ipc::ColumnDisplay;
+use smithay::output;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::utils::{Logical, Size};
 use smithay::wayland::compositor::with_states;
@@ -14,6 +15,7 @@ use smithay::wayland::shell::xdg::{
     SurfaceCachedState, ToplevelSurface, XdgToplevelSurfaceRoleAttributes,
 };
 
+use crate::utils::scale::closest_representable_scale;
 use crate::utils::with_toplevel_role;
 
 pub mod mapped;
@@ -81,6 +83,9 @@ pub struct ResolvedWindowRules {
     pub max_width: Option<u16>,
     /// Extra bound on the maximum window height.
     pub max_height: Option<u16>,
+
+    /// Scale to advertise to this window instead of the output scale.
+    pub scale: Option<f64>,
 
     /// Focus ring overrides.
     pub focus_ring: BorderRule,
@@ -275,6 +280,9 @@ impl ResolvedWindowRules {
                 if let Some(x) = rule.max_height {
                     resolved.max_height = Some(x);
                 }
+                if let Some(x) = rule.scale {
+                    resolved.scale = Some(closest_representable_scale(x.0.clamp(0.1, 10.)));
+                }
 
                 resolved.focus_ring.merge_with(&rule.focus_ring);
                 resolved.border.merge_with(&rule.border);
@@ -327,6 +335,13 @@ impl ResolvedWindowRules {
         });
 
         resolved
+    }
+
+    /// Returns the scale that should be advertised to this window on an output.
+    pub fn preferred_scale(&self, output_scale: output::Scale) -> output::Scale {
+        self.scale
+            .map(output::Scale::Fractional)
+            .unwrap_or(output_scale)
     }
 
     pub fn apply_min_size(&self, min_size: Size<i32, Logical>) -> Size<i32, Logical> {
@@ -458,4 +473,30 @@ fn window_matches(window: WindowRef, role: &XdgToplevelSurfaceRoleAttributes, m:
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preferred_scale_follows_output_without_override() {
+        let rules = ResolvedWindowRules::default();
+        let scale = rules.preferred_scale(output::Scale::Fractional(2.));
+
+        assert_eq!(scale.fractional_scale(), 2.);
+        assert_eq!(scale.integer_scale(), 2);
+    }
+
+    #[test]
+    fn preferred_scale_override_is_absolute() {
+        let rules = ResolvedWindowRules {
+            scale: Some(1.5),
+            ..Default::default()
+        };
+        let scale = rules.preferred_scale(output::Scale::Fractional(2.));
+
+        assert_eq!(scale.fractional_scale(), 1.5);
+        assert_eq!(scale.integer_scale(), 2);
+    }
 }
