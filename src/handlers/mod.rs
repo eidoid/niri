@@ -73,6 +73,7 @@ use smithay::{
 };
 
 pub use crate::handlers::xdg_shell::KdeDecorationsModeState;
+use crate::input::focus_target::SurfaceFocusTarget;
 use crate::layout::workspace::WorkspaceId;
 use crate::layout::ActivateWindow;
 use crate::niri::{DndIcon, NewClient, State};
@@ -100,8 +101,8 @@ pub const XDG_ACTIVATION_TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl SeatHandler for State {
     type KeyboardFocus = WlSurface;
-    type PointerFocus = WlSurface;
-    type TouchFocus = WlSurface;
+    type PointerFocus = SurfaceFocusTarget;
+    type TouchFocus = SurfaceFocusTarget;
 
     fn seat_state(&mut self) -> &mut SeatState<State> {
         &mut self.niri.seat_state
@@ -199,6 +200,7 @@ impl PointerConstraintsHandler for State {
             root = parent;
         }
 
+        let location = location.upscale(surface_under_pointer.scale());
         let target = self
             .niri
             .output_for_root(&root)
@@ -357,7 +359,7 @@ impl DndGrabHandler for State {
         _seat: Seat<Self>,
         location: Point<f64, Logical>,
     ) {
-        let target: Option<&WlSurface> = target.map(DndTarget::into_inner);
+        let target: Option<&SurfaceFocusTarget> = target.map(DndTarget::into_inner);
         trace!("dnd dropped, target: {target:?}, validated: {validated}");
 
         // End DnD before activating a specific window below so that it takes precedence.
@@ -367,7 +369,7 @@ impl DndGrabHandler for State {
         // example. On successful drop, additionally activate the target window.
         let mut activate_output = true;
         if let Some(target) = validated.then_some(target).flatten() {
-            let root = self.niri.find_root_shell_surface(target);
+            let root = self.niri.find_root_shell_surface(target.surface());
             if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&root) {
                 let window = mapped.window.clone();
                 self.niri.layout.activate_window(&window);

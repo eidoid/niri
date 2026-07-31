@@ -55,6 +55,7 @@ use crate::utils::spawning::{spawn, spawn_sh};
 use crate::utils::{center, get_monotonic_time, CastSessionId, ResizeEdge};
 
 pub mod backend_ext;
+pub mod focus_target;
 pub mod move_grab;
 pub mod pick_color_grab;
 pub mod pick_window_grab;
@@ -2531,7 +2532,7 @@ impl State {
             // No need to check if the pointer focus surface matches, because here we're checking
             // for an already-active constraint, and the constraint is deactivated when the focused
             // surface changes.
-            let pos_within_surface = pos - under.1;
+            let pos_within_surface = under.0.to_surface_point(pos - under.1);
 
             let mut pointer_locked = false;
             with_pointer_constraint(&under.0, &pointer, |constraint| {
@@ -2663,7 +2664,8 @@ impl State {
 
             // Prevent the pointer from leaving the confine region, if any.
             if let Some(region) = region {
-                let new_pos_within_surface = new_pos - focus_surface.1;
+                let new_pos_within_surface =
+                    focus_surface.0.to_surface_point(new_pos - focus_surface.1);
                 if !region.contains(new_pos_within_surface.to_i32_round()) {
                     prevent = true;
                 }
@@ -3204,7 +3206,7 @@ impl State {
             // updating the pointer contents.
             pointer
                 .current_focus()
-                .map(|surface| self.niri.find_root_shell_surface(&surface))
+                .map(|surface| self.niri.find_root_shell_surface(surface.surface()))
                 .is_none_or(|root| {
                     !self
                         .niri
@@ -3599,7 +3601,7 @@ impl State {
         // Get window-specific scroll factor
         let window_scroll_factor = pointer
             .current_focus()
-            .map(|focused| self.niri.find_root_shell_surface(&focused))
+            .map(|focused| self.niri.find_root_shell_surface(focused.surface()))
             .and_then(|root| self.niri.layout.find_window_and_output(&root).unzip().0)
             .and_then(|window| window.rules().scroll_factor)
             .unwrap_or(1.);
@@ -3707,9 +3709,13 @@ impl State {
                 tool.wheel(event.wheel_delta(), event.wheel_delta_discrete());
             }
 
+            let surface = under.surface.map(|(target, origin)| {
+                let surface_local = target.to_surface_point(pos - origin);
+                (target.surface().clone(), pos - surface_local)
+            });
             tool.motion(
                 pos,
-                under.surface,
+                surface,
                 &tablet,
                 SERIAL_COUNTER.next_serial(),
                 event.time_msec(),
@@ -3850,6 +3856,8 @@ impl State {
             match event.state() {
                 ProximityState::In => {
                     if let Some(under) = under.surface {
+                        let surface_local = under.0.to_surface_point(pos - under.1);
+                        let under = (under.0.surface().clone(), pos - surface_local);
                         tool.proximity_in(
                             pos,
                             under,

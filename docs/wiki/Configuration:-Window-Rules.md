@@ -626,10 +626,12 @@ By default, windows receive the scale of the output they are on.
 
 This is an absolute override rather than a multiplier.
 For example, a window with `scale 1.5` receives a preferred fractional scale of 1.5 even when it is on an output with scale 2.
-The window's logical size and its size in the layout do not change.
+In that example, niri maps the window's surface coordinates into the layout at 1.5 / 2 = 0.75 scale.
+This keeps a correctly sized client buffer at its native pixel density instead of enlarging a low-resolution buffer, while layout sizes and constraints remain in the output's logical coordinate space.
+The natural visual size of a floating window may therefore change when this rule changes.
 
 Clients that do not support fractional scaling receive the scale rounded up to the nearest integer.
-Rendering may appear blurry when the window scale differs from the output scale because the window buffer needs to be scaled for display.
+Such clients may still require downscaling for non-integer values.
 
 ```kdl
 window-rule {

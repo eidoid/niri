@@ -17,6 +17,8 @@ use niri_config::{Config, OutputName};
 use smithay::backend::renderer::utils::{
     with_renderer_surface_state, RendererSurfaceStateUserData,
 };
+use smithay::desktop::utils::with_surfaces_surface_tree;
+use smithay::desktop::{PopupKind, PopupManager, Window};
 use smithay::input::pointer::CursorIcon;
 use smithay::output::{self, Output};
 use smithay::reexports::rustix::time::{clock_gettime, ClockId};
@@ -27,6 +29,7 @@ use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource as _};
 use smithay::utils::{Coordinate, Logical, Point, Rectangle, Size, Transform};
 use smithay::wayland::compositor::{send_surface_state, with_states, SurfaceData};
 use smithay::wayland::fractional_scale::with_fractional_scale;
+use smithay::wayland::seat::WaylandFocus as _;
 use smithay::wayland::shell::xdg::{
     ToplevelCachedState, ToplevelConfigure, ToplevelState, ToplevelSurface, XdgToplevelSurfaceData,
     XdgToplevelSurfaceRoleAttributes,
@@ -265,6 +268,39 @@ pub fn send_scale_transform(
     with_fractional_scale(data, |fractional| {
         fractional.set_preferred_scale(scale.fractional_scale());
     });
+}
+
+/// Sends scale and transform to a window and its popups.
+///
+/// Input-method popups belong to a different client, so they keep the output scale rather than
+/// inheriting the window-rule override.
+pub fn send_window_scale_transform(
+    window: &Window,
+    preferred_scale: output::Scale,
+    output_scale: output::Scale,
+    transform: Transform,
+) {
+    let Some(surface) = window.wl_surface() else {
+        return;
+    };
+
+    let mut send_preferred = |surface: &WlSurface, data: &SurfaceData| {
+        send_scale_transform(surface, data, preferred_scale, transform);
+    };
+    with_surfaces_surface_tree(&surface, &mut send_preferred);
+
+    for (popup, _) in PopupManager::popups_for_surface(&surface) {
+        match popup {
+            PopupKind::Xdg(_) => {
+                with_surfaces_surface_tree(popup.wl_surface(), &mut send_preferred);
+            }
+            PopupKind::InputMethod(_) => {
+                with_surfaces_surface_tree(popup.wl_surface(), |surface, data| {
+                    send_scale_transform(surface, data, output_scale, transform);
+                });
+            }
+        }
+    }
 }
 
 pub fn expand_home(path: &Path) -> anyhow::Result<Option<PathBuf>> {

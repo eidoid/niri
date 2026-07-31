@@ -2,11 +2,11 @@ use std::cell::{Cell, Ref, RefCell};
 use std::time::Duration;
 
 use niri_config::{Color, Config, CornerRadius, GradientInterpolation, WindowRule};
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::GlesRenderer;
 use smithay::desktop::space::SpaceElement as _;
-use smithay::desktop::{PopupKind, PopupManager, Window};
+use smithay::desktop::utils::{bbox_from_surface_tree, under_from_surface_tree};
+use smithay::desktop::{PopupKind, PopupManager, Window, WindowSurfaceType};
 use smithay::output::{self, Output};
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -35,14 +35,15 @@ use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
 use crate::render_helpers::surface::{
-    push_elements_from_surface_tree, render_snapshot_from_surface_tree,
+    push_scaled_elements_from_surface_tree, render_snapshot_from_surface_tree,
+    ScaledSurfaceRenderElement, SurfaceRenderScaling,
 };
 use crate::render_helpers::xray::XrayPos;
 use crate::render_helpers::{background_effect, BakedBuffer, RenderCtx, RenderTarget};
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::Transaction;
 use crate::utils::{
-    get_credentials_for_surface, send_scale_transform, update_tiled_state,
+    get_credentials_for_surface, send_window_scale_transform, update_tiled_state,
     with_toplevel_last_uncommitted_configure, with_toplevel_role, with_toplevel_role_and_current,
     ResizeEdge,
 };
@@ -360,9 +361,100 @@ impl Mapped {
 
     fn send_preferred_scale_transform(&self, output_scale: output::Scale, transform: Transform) {
         let scale = self.rules.preferred_scale(output_scale);
-        self.window.with_surfaces(|surface, data| {
-            send_scale_transform(surface, data, scale, transform);
-        });
+        send_window_scale_transform(&self.window, scale, output_scale, transform);
+    }
+
+    pub fn content_scale(&self) -> f64 {
+        self.preferred_scale_transform
+            .get()
+            .map_or(1., |(scale, _)| self.rules.content_scale(scale))
+    }
+
+    pub fn visual_bbox_with_popups(&self) -> Rectangle<f64, Logical> {
+        let content_scale = self.content_scale();
+        let geometry_loc = self.window.geometry().loc;
+        let mut bounding_box = self.window.bbox().to_f64().upscale(content_scale);
+
+        for (popup, offset) in PopupManager::popups_for_surface(self.toplevel().wl_surface()) {
+            let popup_geo = popup.geometry();
+            let mut popup_bbox = bbox_from_surface_tree(popup.wl_surface(), (0, 0)).to_f64();
+
+            match popup {
+                PopupKind::Xdg(_) => {
+                    popup_bbox = popup_bbox.upscale(content_scale);
+                    popup_bbox.loc += (geometry_loc + offset - popup_geo.loc)
+                        .to_f64()
+                        .upscale(content_scale);
+                }
+                PopupKind::InputMethod(_) => {
+                    popup_bbox.loc += (geometry_loc + offset - popup_geo.loc)
+                        .to_f64()
+                        .upscale(content_scale);
+                }
+            }
+
+            bounding_box = bounding_box.merge(popup_bbox);
+        }
+
+        bounding_box
+    }
+
+    /// Finds a surface under a point relative to the window's buffer origin.
+    ///
+    /// The returned location uses the same visual coordinate space as the input point. The scale
+    /// is the conversion from that space to the target surface's protocol coordinate space.
+    pub fn surface_under(
+        &self,
+        point: Point<f64, Logical>,
+    ) -> Option<(WlSurface, Point<f64, Logical>, f64)> {
+        let content_scale = self.content_scale();
+        let geometry_loc = self.window.geometry().loc;
+        let popup_types = WindowSurfaceType::POPUP | WindowSurfaceType::SUBSURFACE;
+
+        for (popup, offset) in PopupManager::popups_for_surface(self.toplevel().wl_surface()) {
+            let popup_geo = popup.geometry();
+            let hit = match popup {
+                PopupKind::Xdg(_) => {
+                    let offset = geometry_loc + offset - popup_geo.loc;
+                    under_from_surface_tree(
+                        popup.wl_surface(),
+                        point.downscale(content_scale),
+                        offset,
+                        popup_types,
+                    )
+                    .map(|(surface, loc)| {
+                        (surface, loc.to_f64().upscale(content_scale), content_scale)
+                    })
+                }
+                PopupKind::InputMethod(_) => {
+                    let offset = (geometry_loc + offset - popup_geo.loc)
+                        .to_f64()
+                        .upscale(content_scale);
+                    under_from_surface_tree(popup.wl_surface(), point - offset, (0, 0), popup_types)
+                        .map(|(surface, loc)| (surface, offset + loc.to_f64(), 1.))
+                }
+            };
+
+            if hit.is_some() {
+                return hit;
+            }
+        }
+
+        under_from_surface_tree(
+            self.toplevel().wl_surface(),
+            point.downscale(content_scale),
+            (0, 0),
+            WindowSurfaceType::TOPLEVEL | WindowSurfaceType::SUBSURFACE,
+        )
+        .map(|(surface, loc)| (surface, loc.to_f64().upscale(content_scale), content_scale))
+    }
+
+    fn to_visual_size(&self, size: Size<i32, Logical>) -> Size<i32, Logical> {
+        size.to_f64().upscale(self.content_scale()).to_i32_round()
+    }
+
+    fn to_surface_size(&self, size: Size<i32, Logical>) -> Size<i32, Logical> {
+        size.to_f64().downscale(self.content_scale()).to_i32_round()
     }
 
     fn resend_preferred_scale_transform(&self) {
@@ -462,7 +554,13 @@ impl Mapped {
         let mut contents = vec![];
 
         let surface = self.toplevel().wl_surface();
-        render_snapshot_from_surface_tree(renderer, surface, buf_pos, &mut contents);
+        render_snapshot_from_surface_tree(
+            renderer,
+            surface,
+            buf_pos,
+            self.content_scale(),
+            &mut contents,
+        );
 
         RenderSnapshot {
             contents,
@@ -537,7 +635,7 @@ impl Mapped {
         scale: Scale<f64>,
         push: &mut dyn FnMut(WindowCastRenderElements<R>),
     ) {
-        let bbox = self.window.bbox_with_popups().to_physical_precise_up(scale);
+        let bbox = self.visual_bbox_with_popups().to_physical_precise_up(scale);
 
         let has_border_shader = BorderRenderElement::has_shader(renderer);
         let radius = self.geometry_corner_radius();
@@ -547,7 +645,13 @@ impl Mapped {
             .to_physical_precise_round(scale)
             .to_logical(scale);
         let radius = radius.fit_to(window_size.w as f32, window_size.h as f32);
-        let location = self.window.geometry().loc.to_f64() - bbox.loc.to_logical(scale);
+        let location = self
+            .window
+            .geometry()
+            .loc
+            .to_f64()
+            .upscale(self.content_scale())
+            - bbox.loc.to_logical(scale);
 
         let use_border = |elem| {
             if let LayoutElementRenderElement::SolidColor(elem) = &elem {
@@ -667,16 +771,25 @@ impl LayoutElement for Mapped {
     }
 
     fn size(&self) -> Size<i32, Logical> {
-        self.window.geometry().size
+        self.to_visual_size(self.window.geometry().size)
     }
 
     fn buf_loc(&self) -> Point<i32, Logical> {
-        Point::from((0, 0)) - self.window.geometry().loc
+        (Point::from((0, 0)) - self.window.geometry().loc)
+            .to_f64()
+            .upscale(self.content_scale())
+            .to_i32_round()
     }
 
     fn is_in_input_region(&self, point: Point<f64, Logical>) -> bool {
-        let surface_local = point + self.window.geometry().loc.to_f64();
-        self.window.is_in_input_region(&surface_local)
+        let point = point
+            + self
+                .window
+                .geometry()
+                .loc
+                .to_f64()
+                .upscale(self.content_scale());
+        self.surface_under(point).is_some()
     }
 
     fn is_input_passthrough(&self) -> bool {
@@ -693,19 +806,20 @@ impl LayoutElement for Mapped {
     ) {
         if ctx.target.should_block_out(self.rules.block_out_from) {
             let mut buffer = self.block_out_buffer.borrow_mut();
-            buffer.resize(self.window.geometry().size.to_f64());
+            buffer.resize(self.size().to_f64());
             let elem =
                 SolidColorRenderElement::from_buffer(&buffer, location, alpha, Kind::Unspecified);
             push(elem.into());
         } else {
             let buf_pos = location - self.window.geometry().loc.to_f64();
+            let origin = location.to_physical_precise_round(scale);
             let surface = self.toplevel().wl_surface();
-            let mut push = |elem: WaylandSurfaceRenderElement<R>| push(elem.into());
-            push_elements_from_surface_tree(
+            let mut push = |elem: ScaledSurfaceRenderElement<R>| push(elem.into());
+            push_scaled_elements_from_surface_tree(
                 ctx.renderer,
                 surface,
                 buf_pos.to_physical_precise_round(scale),
-                scale,
+                SurfaceRenderScaling::new(origin, scale, self.content_scale()),
                 alpha,
                 Kind::ScanoutCandidate,
                 &mut push,
@@ -727,8 +841,11 @@ impl LayoutElement for Mapped {
         }
 
         let surface = self.toplevel().wl_surface();
+        let origin = location.to_physical_precise_round(scale);
+        let content_scale = self.content_scale();
         for (popup, offset) in PopupManager::popups_for_surface(surface) {
-            let popup_rules = match popup {
+            let is_xdg = matches!(&popup, PopupKind::Xdg(_));
+            let popup_rules = match &popup {
                 PopupKind::Xdg(_) => self.rules.popups,
                 // IME popups aren't affected by rules for regular popups.
                 PopupKind::InputMethod(_) => niri_config::ResolvedPopupsRules::default(),
@@ -737,27 +854,51 @@ impl LayoutElement for Mapped {
 
             let surface = popup.wl_surface();
             let popup_geo = popup.geometry();
-            let surface_loc = location + (offset - popup.geometry().loc).to_f64();
+            let popup_loc = location + offset.to_f64().upscale(content_scale);
+            let (surface_loc, popup_content_scale, popup_origin) = if is_xdg {
+                (
+                    location + (offset - popup_geo.loc).to_f64(),
+                    content_scale,
+                    origin,
+                )
+            } else {
+                let surface_loc = popup_loc - popup_geo.loc.to_f64().upscale(content_scale);
+                (
+                    surface_loc,
+                    1.,
+                    surface_loc.to_physical_precise_round(scale),
+                )
+            };
 
-            push_elements_from_surface_tree(
+            push_scaled_elements_from_surface_tree(
                 ctx.renderer,
                 surface,
                 surface_loc.to_physical_precise_round(scale),
-                scale,
+                SurfaceRenderScaling::new(popup_origin, scale, popup_content_scale),
                 alpha,
                 Kind::ScanoutCandidate,
                 &mut |elem| push(elem.into()),
             );
 
-            let geometry = Rectangle::new(location + offset.to_f64(), popup_geo.size.to_f64());
-            let surface_off = popup_geo.loc.upscale(-1).to_f64();
-            let surface_anim_scale = Scale::from(1.);
+            let popup_size =
+                popup_geo
+                    .size
+                    .to_f64()
+                    .upscale(if is_xdg { content_scale } else { 1. });
+            let geometry = Rectangle::new(popup_loc, popup_size);
+            let surface_off =
+                popup_geo
+                    .loc
+                    .upscale(-1)
+                    .to_f64()
+                    .upscale(if is_xdg { 1. } else { content_scale });
+            let surface_anim_scale = Scale::from(popup_content_scale);
             let mut effect = popup_rules.background_effect;
             // Default xray to false for pop-ups since they're always on top of something.
             if effect.xray.is_none() {
                 effect.xray = Some(false);
             }
-            let xray_pos = xray_pos.offset(offset.to_f64());
+            let xray_pos = xray_pos.offset(offset.to_f64().upscale(content_scale));
             background_effect::render_for_tile(
                 ctx.as_gles(),
                 None,
@@ -789,6 +930,11 @@ impl LayoutElement for Mapped {
         push: &mut dyn FnMut(BackgroundEffectElement),
     ) {
         let should_block_out = ctx.target.should_block_out(self.rules.block_out_from);
+        let content_scale = self.content_scale();
+        let surface_anim_scale = Scale {
+            x: surface_anim_scale.x * content_scale,
+            y: surface_anim_scale.y * content_scale,
+        };
         background_effect::render_for_tile(
             ctx,
             None,
@@ -796,7 +942,7 @@ impl LayoutElement for Mapped {
             scale,
             clip_to_geometry,
             self.toplevel().wl_surface(),
-            self.buf_loc().to_f64(),
+            self.window.geometry().loc.upscale(-1).to_f64(),
             surface_anim_scale,
             self.blur_config,
             radius,
@@ -814,6 +960,7 @@ impl LayoutElement for Mapped {
         animate: bool,
         transaction: Option<Transaction>,
     ) {
+        let size = self.to_surface_size(size);
         // Going into real fullscreen resets windowed fullscreen.
         if mode == SizingMode::Fullscreen {
             self.is_pending_windowed_fullscreen = false;
@@ -866,6 +1013,7 @@ impl LayoutElement for Mapped {
     }
 
     fn request_size_once(&mut self, size: Size<i32, Logical>, animate: bool) {
+        let size = self.to_surface_size(size);
         // Assume that when calling this function, the window is going floating, so it can no
         // longer participate in any transactions with other windows.
         self.transaction_for_next_configure = None;
@@ -943,7 +1091,7 @@ impl LayoutElement for Mapped {
             guard.current().min_size
         });
 
-        self.rules.apply_min_size(min_size)
+        self.rules.apply_min_size(self.to_visual_size(min_size))
     }
 
     fn max_size(&self) -> Size<i32, Logical> {
@@ -952,7 +1100,7 @@ impl LayoutElement for Mapped {
             guard.current().max_size
         });
 
-        self.rules.apply_max_size(max_size)
+        self.rules.apply_max_size(self.to_visual_size(max_size))
     }
 
     fn is_wl_surface(&self, wl_surface: &WlSurface) -> bool {
@@ -1041,6 +1189,7 @@ impl LayoutElement for Mapped {
     }
 
     fn set_bounds(&self, bounds: Size<i32, Logical>) {
+        let bounds = self.to_surface_size(bounds);
         self.toplevel().with_pending_state(|state| {
             state.bounds = Some(bounds);
         });
@@ -1258,7 +1407,9 @@ impl LayoutElement for Mapped {
     }
 
     fn requested_size(&self) -> Option<Size<i32, Logical>> {
-        self.toplevel().with_pending_state(|state| state.size)
+        self.toplevel()
+            .with_pending_state(|state| state.size)
+            .map(|size| self.to_visual_size(size))
     }
 
     fn expected_size(&self) -> Option<Size<i32, Logical>> {
@@ -1279,7 +1430,7 @@ impl LayoutElement for Mapped {
         // will return the window's own new size, but the logic below would see an uncommitted size
         // change and return our size.
         if let Some(RequestSizeOnce::UseWindowSize) = self.request_size_once {
-            return current_size;
+            return current_size.map(|size| self.to_visual_size(size));
         }
 
         let pending = with_states(self.toplevel().wl_surface(), |states| {
@@ -1342,10 +1493,10 @@ impl LayoutElement for Mapped {
                 size.h = current_size?.h;
             }
 
-            Some(size)
+            Some(self.to_visual_size(size))
         } else {
             // No pending size, return the current size if it's non-fullscreen.
-            current_size
+            current_size.map(|size| self.to_visual_size(size))
         }
     }
 

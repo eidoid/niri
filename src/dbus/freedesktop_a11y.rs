@@ -692,7 +692,7 @@ impl State {
                     // The current definition of the protocol expects buffer-relative pointer
                     // coordinates. I don't think this is correct, I opened a discussion here:
                     // https://gitlab.gnome.org/GNOME/mutter/-/work_items/4919
-                    let pos_within_surface = pointer_pos - *surface_pos;
+                    let pos_within_surface = surface.to_surface_point(pointer_pos - *surface_pos);
 
                     let data = PointerAppData {
                         pid: Some(credentials.pid),

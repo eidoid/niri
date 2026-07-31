@@ -43,7 +43,6 @@ use niri_config::{
 };
 use niri_ipc::{ColumnDisplay, PositionChange, SizeChange, WindowLayout};
 use scrolling::{Column, ColumnWidth};
-use smithay::backend::renderer::element::surface::WaylandSurfaceRenderElement;
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::output::{self, Output};
@@ -64,6 +63,7 @@ use crate::render_helpers::offscreen::OffscreenData;
 use crate::render_helpers::renderer::NiriRenderer;
 use crate::render_helpers::snapshot::RenderSnapshot;
 use crate::render_helpers::solid_color::{SolidColorBuffer, SolidColorRenderElement};
+use crate::render_helpers::surface::ScaledSurfaceRenderElement;
 use crate::render_helpers::texture::TextureBuffer;
 use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::{BakedBuffer, RenderCtx};
@@ -112,7 +112,7 @@ pub struct SizeFrac;
 
 niri_render_elements! {
     LayoutElementRenderElement<R> => {
-        Wayland = WaylandSurfaceRenderElement<R>,
+        Wayland = ScaledSurfaceRenderElement<R>,
         SolidColor = SolidColorRenderElement,
         BackgroundEffect = BackgroundEffectElement,
     }
@@ -1009,6 +1009,13 @@ impl<W: LayoutElement> Layout<W> {
                     }
                 };
                 let mon = &mut monitors[mon_idx];
+
+                // Set this before querying the window size below. Per-window content scaling
+                // depends on the output scale and affects the window's visual size.
+                window.set_preferred_scale_transform(
+                    mon.output.current_scale(),
+                    mon.output.current_transform(),
+                );
 
                 let (ws_idx, _) = mon.resolve_add_window_target(target);
                 let ws = &mon.workspaces[ws_idx];

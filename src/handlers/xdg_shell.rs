@@ -47,7 +47,7 @@ use crate::utils::transaction::Transaction;
 use crate::utils::{
     get_monotonic_time, output_matches_name, send_scale_transform, update_tiled_state, ResizeEdge,
 };
-use crate::window::{InitialConfigureState, ResolvedWindowRules, Unmapped, WindowRef};
+use crate::window::{InitialConfigureState, Mapped, ResolvedWindowRules, Unmapped, WindowRef};
 
 impl XdgShellHandler for State {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -1245,7 +1245,7 @@ impl State {
 
         // Figure out if the root is a window or a layer surface.
         if let Some((mapped, _)) = self.niri.layout.find_window_and_output(&root) {
-            self.unconstrain_window_popup(popup, &mapped.window);
+            self.unconstrain_window_popup(popup, mapped);
         } else if let Some((layer_surface, output)) = self.niri.layout.outputs().find_map(|o| {
             let map = layer_map_for_output(o);
             let layer_surface = map.layer_for_surface(&root, WindowSurfaceType::TOPLEVEL)?;
@@ -1255,10 +1255,14 @@ impl State {
         }
     }
 
-    fn unconstrain_window_popup(&self, popup: &PopupKind, window: &Window) {
+    fn unconstrain_window_popup(&self, popup: &PopupKind, mapped: &Mapped) {
         // The target geometry for the positioner should be relative to its parent's geometry, so
         // we will compute that here.
-        let mut target = self.niri.layout.popup_target_rect(window);
+        let mut target = self
+            .niri
+            .layout
+            .popup_target_rect(&mapped.window)
+            .downscale(mapped.content_scale());
         target.loc -= get_popup_toplevel_coords(popup).to_f64();
 
         self.position_popup_within_rect(popup, target, true);
@@ -1351,13 +1355,16 @@ impl State {
     pub fn update_reactive_popups(&self, window: &Window) {
         let _span = tracy_client::span!("Niri::update_reactive_popups");
 
-        for (popup, _) in PopupManager::popups_for_surface(
-            window.toplevel().expect("no x11 support").wl_surface(),
-        ) {
+        let surface = window.toplevel().expect("no x11 support").wl_surface();
+        let Some((mapped, _)) = self.niri.layout.find_window_and_output(surface) else {
+            return;
+        };
+
+        for (popup, _) in PopupManager::popups_for_surface(surface) {
             match &popup {
                 xdg_popup @ PopupKind::Xdg(popup) => {
                     if popup.with_pending_state(|state| state.positioner.reactive) {
-                        self.unconstrain_window_popup(xdg_popup, window);
+                        self.unconstrain_window_popup(xdg_popup, mapped);
                         if let Err(err) = popup.send_pending_configure() {
                             warn!("error re-configuring reactive popup: {err:?}");
                         }
@@ -1384,11 +1391,15 @@ impl State {
 
                 if scale_changed {
                     if let Some(output) = output {
-                        let scale = rules.preferred_scale(output.current_scale());
+                        let output_scale = output.current_scale();
+                        let scale = rules.preferred_scale(output_scale);
                         let transform = output.current_transform();
-                        unmapped.window.with_surfaces(|surface, data| {
-                            send_scale_transform(surface, data, scale, transform);
-                        });
+                        crate::utils::send_window_scale_transform(
+                            &unmapped.window,
+                            scale,
+                            output_scale,
+                            transform,
+                        );
                     }
                 }
             }

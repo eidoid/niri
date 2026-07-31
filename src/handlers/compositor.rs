@@ -2,6 +2,7 @@ use std::collections::hash_map::Entry;
 
 use niri_ipc::PositionChange;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
+use smithay::desktop::PopupKind;
 use smithay::input::pointer::{CursorImageStatus, CursorImageSurfaceData};
 use smithay::reexports::calloop::Interest;
 use smithay::reexports::wayland_server::protocol::wl_buffer;
@@ -40,12 +41,19 @@ impl CompositorHandler for State {
         while let Some(parent) = get_parent(&root) {
             root = parent;
         }
+        let use_window_scale = !matches!(
+            self.niri.popups.find_popup(&root),
+            Some(PopupKind::InputMethod(_))
+        );
         let root = self.niri.find_root_shell_surface(&root);
 
         if let Some(output) = self.niri.output_for_root(&root) {
-            let scale = self
-                .niri
-                .preferred_scale_for_root(&root, output.current_scale());
+            let scale = if use_window_scale {
+                self.niri
+                    .preferred_scale_for_root(&root, output.current_scale())
+            } else {
+                output.current_scale()
+            };
             let transform = output.current_transform();
             with_states(surface, |data| {
                 send_scale_transform(surface, data, scale, transform);
@@ -265,6 +273,7 @@ impl CompositorHandler for State {
             // This is a commit of a previously-mapped root or a non-toplevel root.
             if let Some((mapped, output)) = self.niri.layout.find_window_and_output(surface) {
                 let window = mapped.window.clone();
+                let content_scale = mapped.content_scale();
                 let output = output.cloned();
 
                 let id = mapped.id();
@@ -351,7 +360,7 @@ impl CompositorHandler for State {
                 // Move the toplevel according to the attach offset.
                 if let Some(delta) = buffer_delta {
                     if delta.x != 0 || delta.y != 0 {
-                        let (x, y) = delta.to_f64().into();
+                        let (x, y) = delta.to_f64().upscale(content_scale).into();
                         self.niri.layout.move_floating_window(
                             Some(&window),
                             PositionChange::AdjustFixed(x),

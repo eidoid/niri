@@ -129,6 +129,7 @@ use crate::dbus::gnome_shell_introspect::{self, IntrospectToNiri, NiriToIntrospe
 use crate::dbus::gnome_shell_screenshot::{NiriToScreenshot, ScreenshotToNiri};
 use crate::frame_clock::FrameClock;
 use crate::handlers::{configure_lock_surface, XDG_ACTIVATION_TOKEN_TIMEOUT};
+use crate::input::focus_target::SurfaceFocusTarget;
 use crate::input::pick_color_grab::PickColorGrab;
 use crate::input::scroll_swipe_gesture::ScrollSwipeGesture;
 use crate::input::scroll_tracker::ScrollTracker;
@@ -535,7 +536,7 @@ pub struct PointContents {
     //
     // Can be `None` even when `window` is set, for example when the pointer is over the niri
     // border around the window.
-    pub surface: Option<(WlSurface, Point<f64, Logical>)>,
+    pub surface: Option<(SurfaceFocusTarget, Point<f64, Logical>)>,
     // If surface belongs to a window, this is that window.
     pub window: Option<(Window, HitType)>,
     // If surface belongs to a layer surface, this is that layer surface.
@@ -3025,10 +3026,13 @@ impl Niri {
                 continue;
             }
 
-            let scale = rules.preferred_scale(scale);
-            unmapped.window.with_surfaces(|surface, data| {
-                send_scale_transform(surface, data, scale, transform);
-            });
+            let preferred_scale = rules.preferred_scale(scale);
+            crate::utils::send_window_scale_transform(
+                &unmapped.window,
+                preferred_scale,
+                scale,
+                transform,
+            );
         }
 
         if let Some(state) = self.output_state.get_mut(output) {
@@ -3350,7 +3354,7 @@ impl Niri {
             )
             .map(|(surface, pos_within_output)| {
                 (
-                    surface,
+                    SurfaceFocusTarget::new(surface, 1.),
                     (pos_within_output + output_pos_in_global_space).to_f64(),
                 )
             });
@@ -3396,7 +3400,10 @@ impl Niri {
                         .surface_under(pos_within_output - layer_pos_within_output, surface_type)
                         .map(|(surface, pos_within_layer)| {
                             (
-                                (surface, pos_within_layer.to_f64() + layer_pos_within_output),
+                                (
+                                    SurfaceFocusTarget::new(surface, 1.),
+                                    pos_within_layer.to_f64() + layer_pos_within_output,
+                                ),
                                 layer_surface,
                             )
                         })
@@ -3411,13 +3418,13 @@ impl Niri {
             let window = &mapped.window;
             let surface_and_pos = if let HitType::Input { win_pos } = hit {
                 let win_pos_within_output = win_pos;
-                window
-                    .surface_under(
-                        pos_within_output - win_pos_within_output,
-                        WindowSurfaceType::ALL,
-                    )
-                    .map(|(s, pos_within_window)| {
-                        (s, pos_within_window.to_f64() + win_pos_within_output)
+                mapped
+                    .surface_under(pos_within_output - win_pos_within_output)
+                    .map(|(surface, pos_within_window, content_scale)| {
+                        (
+                            SurfaceFocusTarget::new(surface, content_scale),
+                            pos_within_window + win_pos_within_output,
+                        )
                     })
             } else {
                 None
@@ -3865,7 +3872,7 @@ impl Niri {
                 let current_focus_matches = is_dnd_grab
                     || pointer
                         .current_focus()
-                        .map(|focused| self.find_root_shell_surface(&focused))
+                        .map(|focused| self.find_root_shell_surface(focused.surface()))
                         .is_some_and(|focused| mapped.is_wl_surface(&focused));
                 if current_focus_matches {
                     // We don't check for pointer visibility because it can only be Visible or
@@ -5685,7 +5692,12 @@ impl Niri {
         };
         mapped.render(
             ctx,
-            mapped.window.geometry().loc.to_f64(),
+            mapped
+                .window
+                .geometry()
+                .loc
+                .to_f64()
+                .upscale(mapped.content_scale()),
             scale,
             alpha,
             XrayPos::default(),
@@ -6154,7 +6166,7 @@ impl Niri {
             // Constraint does not apply if not within region.
             if let Some(region) = constraint.region() {
                 let pointer_pos = pointer.current_location();
-                let pos_within_surface = pointer_pos - *surface_loc;
+                let pos_within_surface = surface.to_surface_point(pointer_pos - *surface_loc);
                 if !region.contains(pos_within_surface.to_i32_round()) {
                     return;
                 }
@@ -6401,11 +6413,15 @@ impl Niri {
 
                     if scale_changed {
                         if let Some(output) = output {
-                            let scale = rules.preferred_scale(output.current_scale());
+                            let output_scale = output.current_scale();
+                            let scale = rules.preferred_scale(output_scale);
                             let transform = output.current_transform();
-                            unmapped.window.with_surfaces(|surface, data| {
-                                send_scale_transform(surface, data, scale, transform);
-                            });
+                            crate::utils::send_window_scale_transform(
+                                &unmapped.window,
+                                scale,
+                                output_scale,
+                                transform,
+                            );
                         }
                     }
                 }

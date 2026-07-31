@@ -344,6 +344,11 @@ impl ResolvedWindowRules {
             .unwrap_or(output_scale)
     }
 
+    /// Returns the scale from window surface coordinates to layout coordinates.
+    pub fn content_scale(&self, output_scale: output::Scale) -> f64 {
+        self.preferred_scale(output_scale).fractional_scale() / output_scale.fractional_scale()
+    }
+
     pub fn apply_min_size(&self, min_size: Size<i32, Logical>) -> Size<i32, Logical> {
         let mut size = min_size;
 
@@ -486,6 +491,7 @@ mod tests {
 
         assert_eq!(scale.fractional_scale(), 2.);
         assert_eq!(scale.integer_scale(), 2);
+        assert_eq!(rules.content_scale(output::Scale::Fractional(2.)), 1.);
     }
 
     #[test]
@@ -498,5 +504,18 @@ mod tests {
 
         assert_eq!(scale.fractional_scale(), 1.5);
         assert_eq!(scale.integer_scale(), 2);
+        assert_eq!(rules.content_scale(output::Scale::Fractional(2.)), 0.75);
+    }
+
+    #[test]
+    fn scale_one_on_scale_two_output_uses_half_size_surface_coordinates() {
+        let rules = ResolvedWindowRules {
+            scale: Some(1.),
+            ..Default::default()
+        };
+        let output_scale = output::Scale::Fractional(2.);
+
+        assert_eq!(rules.preferred_scale(output_scale).fractional_scale(), 1.);
+        assert_eq!(rules.content_scale(output_scale), 0.5);
     }
 }

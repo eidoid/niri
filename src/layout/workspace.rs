@@ -36,10 +36,7 @@ use crate::render_helpers::xray::{Xray, XrayPos};
 use crate::render_helpers::RenderCtx;
 use crate::utils::id::IdCounter;
 use crate::utils::transaction::{Transaction, TransactionBlocker};
-use crate::utils::{
-    ensure_min_max_size, ensure_min_max_size_maybe_zero, output_size, send_scale_transform,
-    ResizeEdge,
-};
+use crate::utils::{ensure_min_max_size, ensure_min_max_size_maybe_zero, output_size, ResizeEdge};
 use crate::window::ResolvedWindowRules;
 
 #[derive(Debug)]
@@ -552,6 +549,14 @@ impl<W: LayoutElement> Workspace<W> {
         self.view_size = size;
         self.working_area = working_area;
 
+        if scale_transform_changed {
+            // Do this before refreshing tile configuration because an absolute per-window scale
+            // changes its visual size when the output scale changes.
+            for window in self.windows() {
+                window.set_preferred_scale_transform(self.scale, self.transform);
+            }
+        }
+
         if fractional_scale_changed {
             // Options need to be recomputed for the new scale.
             self.update_config(self.base_options.clone());
@@ -576,12 +581,6 @@ impl<W: LayoutElement> Workspace<W> {
         }
 
         self.background_buffer.resize(size);
-
-        if scale_transform_changed {
-            for window in self.windows() {
-                window.set_preferred_scale_transform(self.scale, self.transform);
-            }
-        }
     }
 
     pub fn view_size(&self) -> Size<f64, Logical> {
@@ -854,31 +853,39 @@ impl<W: LayoutElement> Workspace<W> {
         rules: &ResolvedWindowRules,
     ) {
         let scale = rules.preferred_scale(self.scale);
-        window.with_surfaces(|surface, data| {
-            send_scale_transform(surface, data, scale, self.transform);
-        });
+        let content_scale = rules.content_scale(self.scale);
+        crate::utils::send_window_scale_transform(window, scale, self.scale, self.transform);
 
         let toplevel = window.toplevel().expect("no x11 support");
-        let (min_size, max_size) = with_states(toplevel.wl_surface(), |state| {
+        let (mut min_size, mut max_size) = with_states(toplevel.wl_surface(), |state| {
             let mut guard = state.cached_state.get::<SurfaceCachedState>();
             let current = guard.current();
             (current.min_size, current.max_size)
         });
+        min_size = min_size.to_f64().upscale(content_scale).to_i32_round();
+        max_size = max_size.to_f64().upscale(content_scale).to_i32_round();
+
+        let to_surface_size =
+            |size: Size<i32, Logical>| size.to_f64().downscale(content_scale).to_i32_round::<i32>();
         toplevel.with_pending_state(|state| {
             if state.states.contains(xdg_toplevel::State::Fullscreen) {
-                state.size = Some(self.view_size.to_i32_round());
+                state.size = Some(to_surface_size(self.view_size.to_i32_round()));
             } else if state.states.contains(xdg_toplevel::State::Maximized) {
-                state.size = Some(self.working_area.size.to_i32_round());
+                state.size = Some(to_surface_size(self.working_area.size.to_i32_round()));
             } else {
                 let size =
                     self.new_window_size(width, height, is_floating, rules, (min_size, max_size));
-                state.size = Some(size);
+                state.size = Some(to_surface_size(size));
             }
 
             if is_floating {
-                state.bounds = Some(self.floating.new_window_toplevel_bounds(rules));
+                state.bounds = Some(to_surface_size(
+                    self.floating.new_window_toplevel_bounds(rules),
+                ));
             } else {
-                state.bounds = Some(self.scrolling.new_window_toplevel_bounds(rules));
+                state.bounds = Some(to_surface_size(
+                    self.scrolling.new_window_toplevel_bounds(rules),
+                ));
             }
         });
     }
